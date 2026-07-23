@@ -1,0 +1,321 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT_ROOT="/run/media/derek/main/chisimba-revival"
+FRAMEWORK_REPO="$PROJECT_ROOT/framework"
+RUNTIME_ROOT="$PROJECT_ROOT/dev-environment/runtime/php82-ch"
+REPORT="${CHISIMBA_REPORT:-$PROJECT_ROOT/killme.txt}"
+REPORT_MODE="${CHISIMBA_REPORT_MODE:-truncate}"
+REPORT_CAPTURE="${CHISIMBA_REPORT_CAPTURE:-1}"
+CONTAINER="chisimba-php82-web"
+
+MODE="changed"
+RESTART="auto"
+DRY_RUN=0
+ALLOW_DIRTY=1
+
+usage() {
+    cat <<'EOF'
+Usage:
+  deploy-framework.sh [options]
+
+Options:
+  --changed           Deploy files changed in the framework working tree
+                      against HEAD. This is the default.
+  --all               Deploy the complete framework application tree.
+  --file PATH         Deploy one framework-relative path. May be repeated.
+  --restart           Always restart chisimba-php82-web after deployment.
+  --no-restart        Never restart the container.
+  --dry-run           Show what would be deployed without changing runtime.
+  --require-clean     Refuse to deploy if framework working tree is dirty.
+  -h, --help          Show this help.
+
+Examples:
+  deploy-framework.sh
+  deploy-framework.sh --file app/core_modules/htmlelements/classes/htmlarea_class_inc.php
+  deploy-framework.sh --changed --restart
+  deploy-framework.sh --all --dry-run
+EOF
+}
+
+section() {
+    printf '\n%s\n%s\n%s\n' \
+        "================================================================================" \
+        "$1" \
+        "================================================================================"
+}
+
+fail() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+FILES=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --changed)
+            MODE="changed"
+            shift
+            ;;
+        --all)
+            MODE="all"
+            shift
+            ;;
+        --file)
+            [[ $# -ge 2 ]] || fail "--file requires a framework-relative path."
+            MODE="files"
+            FILES+=("$2")
+            shift 2
+            ;;
+        --restart)
+            RESTART="yes"
+            shift
+            ;;
+        --no-restart)
+            RESTART="no"
+            shift
+            ;;
+        --dry-run)
+            DRY_RUN=1
+            shift
+            ;;
+        --require-clean)
+            ALLOW_DIRTY=0
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            fail "Unknown option: $1"
+            ;;
+    esac
+done
+
+if [[ "$REPORT_CAPTURE" == "1" ]]; then
+    case "$REPORT_MODE" in
+        truncate)
+            : > "$REPORT"
+            ;;
+        append)
+            touch "$REPORT"
+            ;;
+        *)
+            fail "Invalid CHISIMBA_REPORT_MODE: $REPORT_MODE"
+            ;;
+    esac
+
+    exec > >(tee -a "$REPORT") 2>&1
+fi
+
+section "CHISIMBA FRAMEWORK DEPLOYMENT"
+echo "Generated:  $(date --iso-8601=seconds)"
+echo "Framework:  $FRAMEWORK_REPO"
+echo "Runtime:    $RUNTIME_ROOT"
+echo "Mode:       $MODE"
+echo "Dry run:    $DRY_RUN"
+echo "Restart:    $RESTART"
+echo "Report:     $REPORT"
+echo "Capture:    $REPORT_CAPTURE"
+echo "Report mode:$REPORT_MODE"
+
+section "1. PRE-FLIGHT"
+
+for cmd in git php python3 sha256sum cp mkdir rm stat; do
+    command -v "$cmd" >/dev/null 2>&1 || fail "Required command not found: $cmd"
+done
+
+[[ -d "$FRAMEWORK_REPO/.git" ]] || fail "Framework repository not found."
+[[ -d "$RUNTIME_ROOT/core_modules" ]] || fail "Runtime root is not valid: $RUNTIME_ROOT"
+
+if [[ "$ALLOW_DIRTY" -eq 0 ]] && [[ -n "$(git -C "$FRAMEWORK_REPO" status --porcelain)" ]]; then
+    fail "Framework working tree is not clean."
+fi
+
+echo "Branch: $(git -C "$FRAMEWORK_REPO" branch --show-current)"
+echo "Commit: $(git -C "$FRAMEWORK_REPO" rev-parse HEAD)"
+echo
+git -C "$FRAMEWORK_REPO" status --short
+
+section "2. BUILD DEPLOYMENT SET"
+
+declare -a CANDIDATES=()
+
+if [[ "$MODE" == "changed" ]]; then
+    while IFS= read -r path; do
+        [[ -n "$path" ]] && CANDIDATES+=("$path")
+    done < <(
+        {
+            git -C "$FRAMEWORK_REPO" diff --name-only --diff-filter=ACMRTUXB HEAD
+            git -C "$FRAMEWORK_REPO" ls-files --others --exclude-standard
+        } | sort -u
+    )
+elif [[ "$MODE" == "files" ]]; then
+    CANDIDATES=("${FILES[@]}")
+elif [[ "$MODE" == "all" ]]; then
+    while IFS= read -r path; do
+        [[ -n "$path" ]] && CANDIDATES+=("$path")
+    done < <(
+        cd "$FRAMEWORK_REPO"
+        find app -type f -print | sort
+    )
+fi
+
+if [[ "${#CANDIDATES[@]}" -eq 0 ]]; then
+    echo "Nothing to deploy."
+    exit 0
+fi
+
+declare -a DEPLOY=()
+declare -a SKIP=()
+
+map_runtime_path() {
+    local source_rel="$1"
+
+    case "$source_rel" in
+        app/*)
+            printf '%s\n' "${source_rel#app/}"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+for source_rel in "${CANDIDATES[@]}"; do
+    source_rel="${source_rel#./}"
+
+    if [[ "$source_rel" == *".."* ]]; then
+        fail "Unsafe path rejected: $source_rel"
+    fi
+
+    if [[ ! -f "$FRAMEWORK_REPO/$source_rel" ]]; then
+        SKIP+=("$source_rel (not a regular file or deleted)")
+        continue
+    fi
+
+    if ! runtime_rel="$(map_runtime_path "$source_rel")"; then
+        SKIP+=("$source_rel (outside deployable app tree)")
+        continue
+    fi
+
+    DEPLOY+=("$source_rel|$runtime_rel")
+done
+
+echo "Deployable files: ${#DEPLOY[@]}"
+for item in "${DEPLOY[@]}"; do
+    echo "  ${item%%|*} -> ${item#*|}"
+done
+
+if [[ "${#SKIP[@]}" -gt 0 ]]; then
+    echo
+    echo "Skipped:"
+    for item in "${SKIP[@]}"; do
+        echo "  $item"
+    done
+fi
+
+[[ "${#DEPLOY[@]}" -gt 0 ]] || fail "No deployable framework app files were found."
+
+section "3. PHP SYNTAX VALIDATION"
+
+for item in "${DEPLOY[@]}"; do
+    source_rel="${item%%|*}"
+    if [[ "$source_rel" == *.php ]]; then
+        php -l "$FRAMEWORK_REPO/$source_rel"
+    fi
+done
+
+section "4. DEPLOY"
+
+changed_count=0
+unchanged_count=0
+php_changed=0
+
+for item in "${DEPLOY[@]}"; do
+    source_rel="${item%%|*}"
+    runtime_rel="${item#*|}"
+
+    src="$FRAMEWORK_REPO/$source_rel"
+    dst="$RUNTIME_ROOT/$runtime_rel"
+
+    src_hash="$(sha256sum "$src" | awk '{print $1}')"
+    dst_hash=""
+
+    if [[ -f "$dst" ]]; then
+        dst_hash="$(sha256sum "$dst" | awk '{print $1}')"
+    fi
+
+    if [[ "$src_hash" == "$dst_hash" ]]; then
+        echo "UNCHANGED: $runtime_rel"
+        unchanged_count=$((unchanged_count + 1))
+        continue
+    fi
+
+    echo "DEPLOY:    $source_rel -> $runtime_rel"
+
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        mkdir -p "$(dirname "$dst")"
+        cp -a "$src" "$dst"
+    fi
+
+    changed_count=$((changed_count + 1))
+    [[ "$source_rel" == *.php ]] && php_changed=1
+done
+
+section "5. VERIFY"
+
+if [[ "$DRY_RUN" -eq 0 ]]; then
+    for item in "${DEPLOY[@]}"; do
+        source_rel="${item%%|*}"
+        runtime_rel="${item#*|}"
+
+        src="$FRAMEWORK_REPO/$source_rel"
+        dst="$RUNTIME_ROOT/$runtime_rel"
+
+        [[ -f "$dst" ]] || fail "Runtime file missing after deployment: $runtime_rel"
+
+        src_hash="$(sha256sum "$src" | awk '{print $1}')"
+        dst_hash="$(sha256sum "$dst" | awk '{print $1}')"
+
+        [[ "$src_hash" == "$dst_hash" ]] \
+            || fail "Hash mismatch after deployment: $runtime_rel"
+
+        if [[ "$runtime_rel" == *.php ]]; then
+            php -l "$dst"
+        fi
+    done
+else
+    echo "Dry run: runtime verification skipped."
+fi
+
+section "6. CONTAINER RESTART"
+
+did_restart=0
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "Dry run: no restart."
+elif [[ "$RESTART" == "no" ]]; then
+    echo "Restart disabled."
+elif [[ "$RESTART" == "yes" ]] || [[ "$php_changed" -eq 1 ]]; then
+    command -v docker >/dev/null 2>&1 || fail "docker command not found."
+    docker inspect "$CONTAINER" >/dev/null 2>&1 || fail "Container not found: $CONTAINER"
+    docker restart "$CONTAINER"
+    did_restart=1
+    echo "Restarted: $CONTAINER"
+else
+    echo "No PHP files changed; automatic restart not required."
+fi
+
+section "7. RESULT"
+
+echo "Deployment completed successfully."
+echo "Changed files:   $changed_count"
+echo "Unchanged files: $unchanged_count"
+echo "Restarted:       $did_restart"
+echo "Dry run:         $DRY_RUN"
+echo
+echo "No Git commit or push was performed."
+echo "No database changes were made."

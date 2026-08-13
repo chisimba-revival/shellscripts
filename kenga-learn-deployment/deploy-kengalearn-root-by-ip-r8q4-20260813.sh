@@ -337,6 +337,14 @@ cd "$deploy"
 docker compose --env-file "$env_file" -f compose.yml build --pull web
 docker compose --env-file "$env_file" -f compose.yml up -d
 
+# Recreate bind-mount consumers after switching the current symlink.
+# Docker resolves a bind-mount symlink when a container is created; an
+# unchanged running container would otherwise continue serving the old release.
+docker compose --env-file "$env_file" -f compose.yml \
+    up -d --no-deps --force-recreate web
+docker compose --env-file "$env_file" -f compose.yml \
+    up -d --no-deps --force-recreate nginx
+
 for attempt in $(seq 1 30)
 do
     if curl --insecure --fail --silent --output /dev/null \

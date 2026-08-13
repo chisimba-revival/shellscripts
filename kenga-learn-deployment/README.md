@@ -166,6 +166,7 @@ It:
 - creates temporary self-signed IP TLS and HTTP authentication;
 - transfers a checksum-verified, timestamped release;
 - starts and health-checks MariaDB, PHP/Apache and Nginx;
+- force-recreates web and Nginx after each `current` symlink switch so Docker binds the selected release;
 - writes a timestamped report to `/home/derek/Downloads/` on the desktop.
 
 Example:

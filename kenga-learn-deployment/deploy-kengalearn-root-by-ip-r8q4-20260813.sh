@@ -130,6 +130,14 @@ cp "$workspace/dev-environment/docker/php74/99-chisimba-runtime-errors.ini" \
 cp "$workspace/dev-environment/local-https/chisimba-forwarded-https.conf" \
     "$bundle/deploy/build/chisimba-forwarded-https.conf"
 
+# Production serves Chisimba at / rather than the development /ch/ path.
+sed -i \
+    's#^include_path = "\.:/var/www/html/ch/lib/pear"$#include_path = ".:/var/www/html/lib/pear"#' \
+    "$bundle/deploy/build/php85.ini"
+grep -Fxq 'include_path = ".:/var/www/html/lib/pear"' \
+    "$bundle/deploy/build/php85.ini" \
+    || fail "Production PEAR include path transformation failed"
+
 # The repository Dockerfile paths are development-context paths. These four
 # substitutions retain the audited image recipe while making this bundle its
 # self-contained Docker build context.

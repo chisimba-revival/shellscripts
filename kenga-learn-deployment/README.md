@@ -158,6 +158,7 @@ It:
 - assembles a clean runtime from the current working trees;
 - removes installer-completion markers from the new release;
 - creates a self-contained PHP 8.5.4 build context;
+- rewrites and verifies PHP's PEAR include path for the production web root;
 - generates the production Compose and Nginx configuration;
 - creates random database and temporary-access secrets on the server;
 - protects writable application directories without making the source tree

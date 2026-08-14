@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 
 # Deploy a fresh Kenga Learn production release from Derek's current working
-# tree to the prepared DigitalOcean host. Publicly trusted TLS is deferred;
-# temporary encrypted and authenticated IP access protects the installer.
+# tree to the prepared DigitalOcean host. Public TLS state is retained under
+# /srv/kengalearn/shared/tls and nginx exposes the installed Chisimba login.
 
 workspace=/run/media/derek/main/chisimba-revival
 server_ip=104.248.35.30
@@ -45,7 +45,7 @@ require_dir()
     [[ -d $1 ]] || fail "Required directory missing: $1"
 }
 
-echo "Kenga Learn production deployment by IP"
+echo "Kenga Learn production deployment"
 echo "Started: $(date --iso-8601=seconds)"
 echo "Source: $workspace"
 echo "Target: $server"
@@ -153,7 +153,7 @@ cat > "$bundle/deploy/nginx/default.conf" <<'NGINX'
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
-    server_name _;
+    server_name kengalearn.com www.kengalearn.com;
 
     return 301 https://$host$request_uri;
 }
@@ -161,7 +161,7 @@ server {
 server {
     listen 443 ssl default_server;
     listen [::]:443 ssl default_server;
-    server_name _;
+    server_name kengalearn.com www.kengalearn.com;
 
     ssl_certificate /etc/nginx/certs/ip.crt;
     ssl_certificate_key /etc/nginx/certs/ip.key;
@@ -170,9 +170,6 @@ server {
     client_max_body_size 256m;
 
     location / {
-        auth_basic "Kenga Learn installation";
-        auth_basic_user_file /etc/nginx/auth/htpasswd;
-
         proxy_pass http://web:80;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
@@ -221,8 +218,7 @@ services:
       - "443:443"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
-      - ./nginx/htpasswd:/etc/nginx/auth/htpasswd:ro
+      - /srv/kengalearn/shared/tls:/etc/nginx/certs:ro
     depends_on:
       web:
         condition: service_healthy
@@ -278,19 +274,18 @@ mkdir -p \
     "$base/shared/usrfiles" \
     "$base/shared/user_images" \
     "$base/shared/error_log" \
-    "$base/shared/error_logs"
+    "$base/shared/error_logs" \
+    "$base/shared/tls"
 
 if [[ ! -f "$env_file" ]]; then
     umask 077
     db_root_password=$(openssl rand -hex 24)
     db_password=$(openssl rand -hex 24)
-    ip_access_password=$(openssl rand -hex 12)
     cat > "$env_file" <<ENV
 MARIADB_ROOT_PASSWORD=$db_root_password
 MARIADB_DATABASE=chisimba
 MARIADB_USER=chisimba
 MARIADB_PASSWORD=$db_password
-KENGALEARN_IP_ACCESS_PASSWORD=$ip_access_password
 ENV
 fi
 chmod 600 "$env_file"
@@ -316,19 +311,19 @@ set -a
 source "$env_file"
 set +a
 
-mkdir -p "$deploy/nginx/certs"
-openssl req -x509 -nodes -newkey rsa:2048 -days 30 \
-    -keyout "$deploy/nginx/certs/ip.key" \
-    -out "$deploy/nginx/certs/ip.crt" \
-    -subj '/CN=104.248.35.30' \
-    -addext 'subjectAltName=IP:104.248.35.30' \
-    >/dev/null 2>&1
-printf 'derek:%s\n' \
-    "$(openssl passwd -apr1 "$KENGALEARN_IP_ACCESS_PASSWORD")" \
-    > "$deploy/nginx/htpasswd"
-chmod 600 \
-    "$deploy/nginx/certs/ip.key"
-chmod 644 "$deploy/nginx/htpasswd"
+# Retain the trusted certificate between immutable application releases.
+# A self-signed fallback is created only when bootstrapping a new host before
+# its public certificate has been issued.
+if [[ ! -s "$base/shared/tls/ip.crt" || ! -s "$base/shared/tls/ip.key" ]]; then
+    openssl req -x509 -nodes -newkey rsa:2048 -days 30 \
+        -keyout "$base/shared/tls/ip.key" \
+        -out "$base/shared/tls/ip.crt" \
+        -subj '/CN=kengalearn.com' \
+        -addext 'subjectAltName=DNS:kengalearn.com,DNS:www.kengalearn.com' \
+        >/dev/null 2>&1
+fi
+chmod 600 "$base/shared/tls/ip.key"
+chmod 644 "$base/shared/tls/ip.crt"
 
 ln -sfn "$release/ch" "$base/app/current.new"
 mv -Tf "$base/app/current.new" "$base/app/current"
@@ -347,9 +342,9 @@ docker compose --env-file "$env_file" -f compose.yml \
 
 for attempt in $(seq 1 30)
 do
-    if curl --insecure --fail --silent --output /dev/null \
-        --user "derek:$KENGALEARN_IP_ACCESS_PASSWORD" \
-        https://127.0.0.1/; then
+    if curl --fail --silent --output /dev/null \
+        --resolve kengalearn.com:443:127.0.0.1 \
+        https://kengalearn.com/; then
         break
     fi
     if [[ $attempt -eq 30 ]]; then
@@ -362,9 +357,7 @@ do
 done
 
 echo "PASS: production containers started and HTTP responded"
-echo "CHISIMBA_URL=https://104.248.35.30/"
-echo "TEMPORARY_ACCESS_USER=derek"
-echo "TEMPORARY_ACCESS_PASSWORD=$KENGALEARN_IP_ACCESS_PASSWORD"
+echo "CHISIMBA_URL=https://kengalearn.com/"
 echo "INSTALLER_DATABASE_HOST=db"
 echo "INSTALLER_DATABASE_NAME=$MARIADB_DATABASE"
 echo "INSTALLER_DATABASE_USER=$MARIADB_USER"
@@ -415,5 +408,5 @@ INSTALL
 echo
 echo "=== RESULT ==="
 echo "KENGALEARN_IP_DEPLOY=PASS"
-echo "URL=https://${server_ip}/"
+echo "URL=https://kengalearn.com/"
 echo "Report: $report"

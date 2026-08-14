@@ -8,8 +8,8 @@ found during the first deployment.
 The production application is served at the web root:
 
 ```text
-https://104.248.35.30/
-https://kengalearn.com/    (after DNS and trusted TLS are configured)
+https://kengalearn.com/
+https://www.kengalearn.com/
 ```
 
 There is deliberately no `/ch/` component in the production URL.
@@ -60,11 +60,11 @@ XML and ZIP support and carries the repository's PHP configuration and runtime
 error handling. The curated PEAR compatibility pack is part of the framework
 source assembled into the release.
 
-The initial IP deployment uses a self-signed certificate valid for the server
-IP. Nginx also requires temporary HTTP authentication so that an anonymous
-visitor cannot take control of the public Chisimba installer. This temporary
-protection should remain until the installation is complete and the real
-domain certificate is active.
+Nginx presents the publicly trusted Let's Encrypt certificate for
+`kengalearn.com` and `www.kengalearn.com`. Certificate material is retained
+under `/srv/kengalearn/shared/tls`, outside immutable application releases.
+The temporary installer HTTP authentication has been removed; Chisimba's own
+authentication is now the public login boundary.
 
 ## Server filesystem
 
@@ -79,11 +79,17 @@ Application releases and persistent data are separated:
 ├── releases/
 │   └── release-TIMESTAMP/
 └── shared/
+    ├── bin/
+    │   └── renew-kengalearn-certificate.sh
     ├── config/
     ├── error_log/
     ├── error_logs/
+    ├── letsencrypt/
     ├── secrets/
     │   └── production.env
+    ├── tls/
+    │   ├── ip.crt
+    │   └── ip.key
     ├── user_images/
     └── usrfiles/
 ```
@@ -93,7 +99,7 @@ The MariaDB data directory is held in the Docker volume named for the
 release.
 
 `shared/secrets/production.env` is mode `600` and contains the generated
-database and temporary web-access secrets. Never commit this file, copy its
+database secrets. Never commit this file, copy its
 contents into documentation, or attach it to a public issue.
 
 ## Source of a release
@@ -141,8 +147,8 @@ Example:
 
 ```bash
 ssh derek@SERVER_IP
-chmod +x ~/bootstrap-kengalearn-ubuntu2604-t4p7-20260813.sh
-~/bootstrap-kengalearn-ubuntu2604-t4p7-20260813.sh
+chmod +x /home/derek/Downloads/bootstrap-kengalearn-ubuntu2604-t4p7-20260813.sh
+/home/derek/Downloads/bootstrap-kengalearn-ubuntu2604-t4p7-20260813.sh
 ```
 
 Reboot if its report says `REBOOT_REQUIRED=YES`, then reconnect as `derek`.
@@ -160,10 +166,10 @@ It:
 - creates a self-contained PHP 8.5.4 build context;
 - rewrites and verifies PHP's PEAR include path for the production web root;
 - generates the production Compose and Nginx configuration;
-- creates random database and temporary-access secrets on the server;
+- creates random database secrets on the server;
 - protects writable application directories without making the source tree
   writable by Apache;
-- creates temporary self-signed IP TLS and HTTP authentication;
+- preserves the host's trusted TLS certificate between application releases;
 - transfers a checksum-verified, timestamped release;
 - starts and health-checks MariaDB, PHP/Apache and Nginx;
 - force-recreates web and Nginx after each `current` symlink switch so Docker binds the selected release;
@@ -172,13 +178,12 @@ It:
 Example:
 
 ```bash
-cd /home/derek/Downloads
-chmod +x deploy-kengalearn-root-by-ip-r8q4-20260813.sh
-./deploy-kengalearn-root-by-ip-r8q4-20260813.sh
+chmod +x /home/derek/Downloads/deploy-kengalearn-root-by-ip-r8q4-20260813.sh
+/home/derek/Downloads/deploy-kengalearn-root-by-ip-r8q4-20260813.sh
 ```
 
-The report contains temporary access and installer database credentials. It
-must be treated as sensitive and must not be committed.
+The report contains installer database credentials. It must be treated as
+sensitive and must not be committed.
 
 This script is for a fresh initial deployment. It is not yet the routine update
 script: it does not implement the required pre-update backup and automatic
@@ -201,35 +206,20 @@ left in that exact partial state.
 Example:
 
 ```bash
-cd /home/derek/Downloads
-chmod +x resume-kengalearn-ip-auth-p3n7-20260813.sh
-./resume-kengalearn-ip-auth-p3n7-20260813.sh
+chmod +x /home/derek/Downloads/resume-kengalearn-ip-auth-p3n7-20260813.sh
+/home/derek/Downloads/resume-kengalearn-ip-auth-p3n7-20260813.sh
 ```
 
-## Completing the installer by IP
+## Public access
 
 Browse to:
 
 ```text
-https://104.248.35.30/
+https://kengalearn.com/
 ```
 
-The browser will warn about the temporary self-signed certificate. After
-accepting the warning, use the temporary access username and password from the
-private deployment report.
-
-Use the installer values reported by the deployment script:
-
-```text
-Database host:     db
-Database name:     chisimba
-Database username: chisimba
-Database password: value reported as INSTALLER_DATABASE_PASSWORD
-Site URL:          https://104.248.35.30/
-```
-
-Use a strong Chisimba administrator password. Password `a` is for disposable
-test accounts only and must not be used for the production administrator.
+The browser should show a trusted connection without an Nginx Basic Auth
+prompt. Site authentication is handled by Chisimba.
 
 ## Routine container operations
 
@@ -267,26 +257,12 @@ after a host reboot.
 
 ## DNS and trusted TLS
 
-DNS was unavailable during the initial deployment because Namecheap's public
-interface was under repair. When it becomes available:
-
-1. Point the apex `kengalearn.com` A record to `104.248.35.30`.
-2. Point `www.kengalearn.com` to the apex with a CNAME, or add a matching A
-   record.
-3. Add the IPv6 AAAA record only after IPv6 web access and firewall behaviour
-   have been verified.
-4. Replace Nginx's catch-all IP configuration with explicit
-   `kengalearn.com` and `www.kengalearn.com` names.
-5. Obtain and automatically renew a publicly trusted certificate.
-6. Redirect `www` to the chosen canonical hostname.
-7. Update Chisimba's canonical site URL from the temporary IP to
-   `https://kengalearn.com/` through its established configuration path.
-8. Remove the temporary installer HTTP authentication only after Chisimba is
-   installed, the administrator login works and the public certificate is
-   active.
-
-Because Chisimba is already installed at `/`, changing from the IP address to
-the domain does not require moving the application or rewriting a `/ch/` path.
+Both `kengalearn.com` and `www.kengalearn.com` resolve to the production
+host. Let's Encrypt issued the certificate for both names on 14 August
+2026. A daily 03:17 renewal check is installed in Derek's server crontab.
+The renewal helper briefly stops Nginx only when Certbot performs its
+standalone validation, then restores Nginx and republishes the renewed
+certificate under `/srv/kengalearn/shared/tls`.
 
 ## Production updates: required next implementation
 

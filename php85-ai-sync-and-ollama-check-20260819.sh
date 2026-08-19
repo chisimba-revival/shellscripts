@@ -13,7 +13,10 @@ echo "Started: $(date -Is)"
 echo "Log: $LOG"
 echo
 
-repos=(framework modules dev-environment shellscripts)
+# Only repositories whose source is deployed are part of the pre-work gate.
+# Do not gate on shellscripts itself: invoking this retained script must not
+# block deployment because of its own executable-bit or local metadata state.
+repos=(framework modules dev-environment)
 
 for repo in "${repos[@]}"; do
     path="$BASE/$repo"
@@ -32,7 +35,7 @@ for repo in "${repos[@]}"; do
     git checkout main
     git pull --ff-only origin main
     echo
- done
+done
 
 RUNTIME="$BASE/dev-environment/runtime/php85-ch"
 

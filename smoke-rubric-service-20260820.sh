@@ -9,9 +9,16 @@ APP_ROOT="/var/www/html/ch"
 CONTEXT_CODE="${1:-root}"
 RUBRIC_ID="${2:-}"
 TMP_PHP="/tmp/chisimba-rubric-service-smoke.php"
+HOST_TMP="$(mktemp /tmp/chisimba-rubric-service-smoke.XXXXXX.php)"
 
 mkdir -p "$DOWNLOADS"
 exec > >(tee "$LOG") 2>&1
+
+cleanup() {
+    rm -f "$HOST_TMP" >/dev/null 2>&1 || true
+    docker exec "$CONTAINER" rm -f "$TMP_PHP" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
 echo "=== Chisimba Rubric service smoke test ==="
 echo "Started: $(date -Is)"
@@ -34,19 +41,12 @@ if [[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER")" != "true" ]]; the
     exit 1
 fi
 
-cleanup() {
-    docker exec "$CONTAINER" rm -f "$TMP_PHP" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-
-echo "[1/3] PHP syntax check"
+echo "[1/4] Rubric service PHP syntax check"
 docker exec "$CONTAINER" php -l "$APP_ROOT/packages/rubric/classes/rubricservice_class_inc.php"
 echo "PASS: rubricservice class parses under container PHP."
 echo
 
-echo "[2/3] Chisimba service load and rubric discovery"
-
-docker exec -i "$CONTAINER" sh -c "cat > '$TMP_PHP'" <<'PHP'
+cat > "$HOST_TMP" <<'PHP'
 <?php
 error_reporting(E_ALL);
 ini_set('display_errors', '1');
@@ -152,6 +152,15 @@ echo "Criteria: " . count($structured['criteria']) . "\n";
 echo "SERVICE_SMOKE=PASS\n";
 PHP
 
+echo "[2/4] Install temporary diagnostic inside PHP 8.5 container"
+echo "Host diagnostic bytes: $(wc -c < "$HOST_TMP")"
+docker cp "$HOST_TMP" "$CONTAINER:$TMP_PHP" >/dev/null
+docker exec "$CONTAINER" test -s "$TMP_PHP"
+echo "PASS: temporary diagnostic copied into container."
+docker exec "$CONTAINER" php -l "$TMP_PHP"
+echo
+
+echo "[3/4] Chisimba service load and rubric discovery"
 set +e
 docker exec \
     -e SMOKE_CONTEXT="$CONTEXT_CODE" \
@@ -168,7 +177,7 @@ if [[ $STATUS -ne 0 ]]; then
     exit "$STATUS"
 fi
 
-echo "[3/3] Result"
+echo "[4/4] Result"
 if grep -q '^SERVICE_SMOKE=PASS$' "$LOG"; then
     echo "PASS: Rubric service loaded and structured retrieval was verified."
 elif grep -q '^SERVICE_SMOKE=PASS_WITHOUT_SAMPLE$' "$LOG"; then

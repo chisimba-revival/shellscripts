@@ -40,7 +40,7 @@ echo
 
 echo "[2/3] Chisimba service load and rubric discovery"
 set +e
-docker exec \
+docker exec -i \
     -e SMOKE_CONTEXT="$CONTEXT_CODE" \
     -e SMOKE_RUBRIC_ID="$RUBRIC_ID" \
     -e SMOKE_APP_ROOT="$APP_ROOT" \

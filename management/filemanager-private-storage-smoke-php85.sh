@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="/run/media/derek/main/chisimba-revival"
+if [ -n "${CHISIMBA_BASE:-}" ]; then
+    BASE="$CHISIMBA_BASE"
+elif [ -d /run/media/derek/main/chisimba-revival ]; then
+    BASE="/run/media/derek/main/chisimba-revival"
+elif [ -d /media/derek/main/chisimba-revival ]; then
+    BASE="/media/derek/main/chisimba-revival"
+else
+    echo "ERROR: cannot locate Chisimba Revival base directory" >&2
+    exit 2
+fi
 DEVENV="$BASE/dev-environment"
 COMPOSE="$DEVENV/compose/php85.yml"
 PRIVATE_STORE="$BASE/private-storage/php85/filemanager"
@@ -17,7 +26,15 @@ fail() {
 }
 
 echo "== FILEMANAGER PRIVATE STORAGE SMOKE =="
+echo "Base: $BASE"
 echo
+
+if ! docker info >/dev/null 2>&1; then
+    echo "ERROR: Docker is not accessible to $(id -un) via /var/run/docker.sock"
+    echo "Resolve Docker group/session access before running this smoke test."
+    echo "Log: $LOG"
+    exit 2
+fi
 
 docker ps --format '{{.Names}}' | grep -qx 'chisimba-php85-web' \
     || fail "chisimba-php85-web is not running"
@@ -44,8 +61,6 @@ docker exec chisimba-php85-web test -f "/var/data/filemanager/$REL" \
 docker exec chisimba-php85-web test ! -e "/var/www/html/ch/usrfiles/$REL" \
   || fail "private marker unexpectedly exists under usrfiles"
 
-# A private-store object must not be directly retrievable by the obvious
-# usrfiles URL path.
 code="$(curl -k -sS -o /dev/null -w '%{http_code}' \
   "https://chisimba.test:8445/ch/usrfiles/$REL" || true)"
 case "$code" in
@@ -53,7 +68,6 @@ case "$code" in
   *) fail "private marker URL returned HTTP $code instead of 403/404" ;;
 esac
 
-# Prove the host-backed private store survives a web-container recreation.
 cd "$DEVENV"
 docker compose -f compose/php85.yml up -d --force-recreate web >/dev/null
 docker compose -f compose/php85.yml up -d nginx >/dev/null

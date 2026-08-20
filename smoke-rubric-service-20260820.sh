@@ -8,6 +8,7 @@ CONTAINER="chisimba-php85-web"
 APP_ROOT="/var/www/html/ch"
 CONTEXT_CODE="${1:-root}"
 RUBRIC_ID="${2:-}"
+TMP_PHP="/tmp/chisimba-rubric-service-smoke.php"
 
 mkdir -p "$DOWNLOADS"
 exec > >(tee "$LOG") 2>&1
@@ -33,18 +34,19 @@ if [[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER")" != "true" ]]; the
     exit 1
 fi
 
+cleanup() {
+    docker exec "$CONTAINER" rm -f "$TMP_PHP" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
 echo "[1/3] PHP syntax check"
 docker exec "$CONTAINER" php -l "$APP_ROOT/packages/rubric/classes/rubricservice_class_inc.php"
 echo "PASS: rubricservice class parses under container PHP."
 echo
 
 echo "[2/3] Chisimba service load and rubric discovery"
-set +e
-docker exec -i \
-    -e SMOKE_CONTEXT="$CONTEXT_CODE" \
-    -e SMOKE_RUBRIC_ID="$RUBRIC_ID" \
-    -e SMOKE_APP_ROOT="$APP_ROOT" \
-    "$CONTAINER" php <<'PHP'
+
+docker exec -i "$CONTAINER" sh -c "cat > '$TMP_PHP'" <<'PHP'
 <?php
 error_reporting(E_ALL);
 ini_set('display_errors', '1');
@@ -149,6 +151,13 @@ echo "Performance levels: " . count($structured['performances']) . "\n";
 echo "Criteria: " . count($structured['criteria']) . "\n";
 echo "SERVICE_SMOKE=PASS\n";
 PHP
+
+set +e
+docker exec \
+    -e SMOKE_CONTEXT="$CONTEXT_CODE" \
+    -e SMOKE_RUBRIC_ID="$RUBRIC_ID" \
+    -e SMOKE_APP_ROOT="$APP_ROOT" \
+    "$CONTAINER" php "$TMP_PHP"
 STATUS=$?
 set -e
 

@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-BASE="/run/media/derek/main/chisimba-revival"
+if [ -n "${CHISIMBA_BASE:-}" ]; then
+    BASE="$CHISIMBA_BASE"
+elif [ -d /run/media/derek/main/chisimba-revival ]; then
+    BASE="/run/media/derek/main/chisimba-revival"
+elif [ -d /media/derek/main/chisimba-revival ]; then
+    BASE="/media/derek/main/chisimba-revival"
+else
+    echo "ERROR: cannot locate Chisimba Revival base directory" >&2
+    exit 2
+fi
 FRAMEWORK="$BASE/framework"
 MODULES="$BASE/modules"
 PRIVATE="$BASE/private-storage/php85/filemanager"
@@ -13,6 +22,13 @@ ASSIGN_SUBMIT="$MODULES/assignment/classes/dbassignmentsubmit_class_inc.php"
 LOG="/home/derek/Downloads/file-security-milestone-smoke-$(date +%Y%m%d-%H%M%S).log"
 
 exec > >(tee "$LOG") 2>&1
+
+if ! docker info >/dev/null 2>&1; then
+    echo "ERROR: Docker is not accessible to $(id -un) via /var/run/docker.sock"
+    echo "Resolve Docker group/session access before running this smoke test."
+    echo "Log: $LOG"
+    exit 2
+fi
 
 PASS=0
 FAIL=0
@@ -50,6 +66,7 @@ PY
 }
 
 echo "== CHISIMBA FILE SECURITY MILESTONE SMOKE =="
+echo "Base: $BASE"
 date
 echo
 
@@ -134,8 +151,6 @@ else
     fail "central folder write-policy method missing"
 fi
 
-# Critical mutation actions must enforce the central folder policy server-side.
-# UI hiding is not an authorization boundary.
 for fn in __upload __createfolder __renamefolder __setfolderaccess __setfileaccess __setfilevisibility __setfolderalerts; do
     if function_body_has "$FM_CONTROLLER" "$fn" "checkPermissionUploadFolder" >/dev/null 2>&1 \
        || function_body_has "$FM_CONTROLLER" "$fn" "canManageFolder" >/dev/null 2>&1; then

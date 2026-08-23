@@ -72,10 +72,9 @@ printf 'FRAMEWORK_ARCHIVE_SHA256=%s\nMODULES_ARCHIVE_SHA256=%s\nCANVASES_ARCHIVE
     "$FRAMEWORK_SHA" "$MODULES_SHA" "$CANVASES_SHA"
 
 say "Assemble an empty local release from those snapshots"
-mkdir -p "$STAGE/packages" "$STAGE/canvases"
+mkdir -p "$STAGE/packages"
 tar -xzf "$FRAMEWORK_ARCHIVE" -C "$STAGE" --strip-components=1
 tar -xzf "$MODULES_ARCHIVE" -C "$STAGE/packages"
-tar -xzf "$CANVASES_ARCHIVE" -C "$STAGE/canvases"
 
 [[ -f "$STAGE/index.php" ]] || fail "Framework snapshot did not produce index.php."
 [[ -f "$STAGE/core_modules/blocks/classes/blocks_class_inc.php" ]] \
@@ -213,7 +212,7 @@ trap rollback ERR
 [[ "$(sha256sum "$CANVASES_ARCHIVE" | awk '{print $1}')" == "$CANVASES_SHA" ]]
 
 echo "Creating precautionary backups of persistent state..."
-mkdir -p "$BACKUP_DIR" "$RELEASE_CH/packages" "$RELEASE_CH/canvases"
+mkdir -p "$BACKUP_DIR" "$RELEASE_CH/packages"
 compose exec -T db mariadb-dump -u"$MARIADB_USER" "-p$MARIADB_PASSWORD" \
     --single-transaction --quick --routines --triggers "$MARIADB_DATABASE" \
     </dev/null | gzip -9 > "$BACKUP_DIR/database.sql.gz"
@@ -227,7 +226,6 @@ sha256sum "$BACKUP_DIR/database.sql.gz" "$BACKUP_DIR/persistent-files.tar.gz" \
 echo "Extracting into an empty application directory..."
 tar -xzf "$FRAMEWORK_ARCHIVE" -C "$RELEASE_CH" --strip-components=1
 tar -xzf "$MODULES_ARCHIVE" -C "$RELEASE_CH/packages"
-tar -xzf "$CANVASES_ARCHIVE" -C "$RELEASE_CH/canvases"
 cleanup_archives
 
 # Bind-mount targets are structural only; their contents remain in /shared.

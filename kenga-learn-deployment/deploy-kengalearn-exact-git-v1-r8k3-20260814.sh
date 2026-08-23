@@ -82,12 +82,12 @@ tar -xzf "$CANVASES_ARCHIVE" -C "$STAGE/canvases"
     || fail "Framework Blocks source is missing."
 [[ -f "$STAGE/packages/contentblocks/classes/contentblockbase_class_inc.php" ]] \
     || fail "Content blocks source is missing from modules Git."
-[[ -f "$STAGE/skins/kenga-learn/canvases/_default/stylesheet.css" ]] \
-    || fail "Kenga Learn canvas source is missing."
+[[ -f "$STAGE/skins/chisimba-reborn/canvases/kenga-learn/stylesheet.css" ]] \
+    || fail "Kenga Learn canvas source is missing from the canonical skin."
 grep -Fq "'blockType' => 'none'" \
     "$STAGE/packages/contentblocks/classes/contentblockbase_class_inc.php"
 grep -Fq 'CHISIMBA COMPLETE COMPONENT WRAPPER CONTRACT' \
-    "$STAGE/skins/kenga-learn/canvases/_default/stylesheet.css"
+    "$STAGE/skins/chisimba-reborn/canvases/_default/stylesheet.css"
 echo "PASS: the clean snapshot contains the renderer and wrapper fix already committed to Git."
 
 say "Run the committed source contracts against the clean snapshot"
@@ -250,11 +250,11 @@ printf '%s\n' \
 
 [[ -f "$RELEASE_CH/index.php" ]]
 [[ -f "$RELEASE_CH/packages/contentblocks/classes/contentblockbase_class_inc.php" ]]
-[[ -f "$RELEASE_CH/skins/kenga-learn/canvases/_default/stylesheet.css" ]]
+[[ -f "$RELEASE_CH/skins/chisimba-reborn/canvases/kenga-learn/stylesheet.css" ]]
 grep -Fq "'blockType' => 'none'" \
     "$RELEASE_CH/packages/contentblocks/classes/contentblockbase_class_inc.php"
 grep -Fq 'CHISIMBA COMPLETE COMPONENT WRAPPER CONTRACT' \
-    "$RELEASE_CH/skins/kenga-learn/canvases/_default/stylesheet.css"
+    "$RELEASE_CH/skins/chisimba-reborn/canvases/_default/stylesheet.css"
 [[ ! -e "$RELEASE_CH/packages/contentblocks/classes/contentblockui_class_inc.php" ]]
 [[ ! -e "$RELEASE_CH/packages/contentblocks/templates/content/editajax_tpl.php" ]]
 

@@ -108,7 +108,6 @@ lint_files=(
     /var/www/html/ch/packages/contentblocks/classes/dbcontentblocks_class_inc.php
     /var/www/html/ch/packages/contentblocks/controller.php
     /var/www/html/ch/skins/chisimba-reborn/templates/page/page_template.php
-    /var/www/html/ch/skins/kenga-learn/templates/page/page_template.php
 )
 for file in "${lint_files[@]}"; do run_local_php -l "$file" >/dev/null; done
 

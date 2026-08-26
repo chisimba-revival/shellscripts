@@ -23,6 +23,6 @@ After the staged service is healthy, configure Apache for
 a certificate containing both names, and verify the public site before
 retiring the old `dev.chisimba.com` virtual host.
 
-`apache/chisimba.com.conf` is the tracked HTTP virtual host used during the
-ACME and installer phase. The final TLS virtual host must preserve the same
-localhost-only proxy boundary and redirect the apex host to canonical `www`.
+The tracked Apache configuration redirects HTTP and the apex hostname to
+canonical `https://www.chisimba.com/`. The TLS virtual host is the only public
+proxy to the localhost-only application service.

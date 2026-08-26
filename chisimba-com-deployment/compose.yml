@@ -1,0 +1,54 @@
+name: chisimba-com
+
+services:
+  web:
+    build:
+      context: ./build
+      dockerfile: Dockerfile
+    image: chisimba-com/chisimba-php85:8.5.4
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8085:80"
+    volumes:
+      - /srv/chisimba-com/app/current:/var/www/html:ro
+      - /srv/chisimba-com/shared/config:/var/www/html/config
+      - /srv/chisimba-com/shared/usrfiles:/var/www/html/usrfiles
+      - /srv/chisimba-com/shared/user_images:/var/www/html/user_images
+      - /srv/chisimba-com/shared/error_log:/var/www/html/error_log
+      - /srv/chisimba-com/shared/error_logs:/var/www/html/error_logs
+      - /srv/chisimba-com/shared/filemanager:/var/data/filemanager
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks: [internal]
+
+  db:
+    image: mariadb:10.11.18
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?required}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:?required}
+      MARIADB_USER: ${MARIADB_USER:?required}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?required}
+    volumes:
+      - database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    networks: [internal]
+
+volumes:
+  database:
+
+networks:
+  internal:
+    driver: bridge

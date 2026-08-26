@@ -118,7 +118,13 @@ sudo ln -sfn "$release_ch" "$base/app/current.new"
 sudo mv -Tf "$base/app/current.new" "$base/app/current"
 
 cd "$deploy"
-sudo docker compose --env-file "$secrets" -f compose.yml up -d --build
+# A bind mount whose source is the `current` symlink is resolved when the
+# container is created. Recreate the web container after switching releases;
+# a plain `compose up` can otherwise continue serving the previous target
+# while the release identity file reports the new commit.
+sudo docker compose --env-file "$secrets" -f compose.yml up -d db
+sudo docker compose --env-file "$secrets" -f compose.yml up -d --build \
+    --no-deps --force-recreate web
 
 for attempt in $(seq 1 30); do
     status="$(sudo docker inspect --format \

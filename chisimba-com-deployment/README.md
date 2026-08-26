@@ -11,6 +11,8 @@ The staging script:
 - exposes the application only on `127.0.0.1:8085`;
 - does not change Apache, TLS or DNS;
 - records the exact framework, modules and canvases commits in every release.
+- recreates the web container after changing the release link, ensuring its
+  bind mount resolves to the same release recorded by that identity file.
 
 Run from the workspace root:
 

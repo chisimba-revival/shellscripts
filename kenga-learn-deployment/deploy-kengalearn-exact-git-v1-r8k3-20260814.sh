@@ -198,6 +198,9 @@ rollback() {
         compose up -d --no-deps --force-recreate web </dev/null || true
     fi
     cleanup_archives
+    # A failed immutable release is never a rollback target. Remove its
+    # incomplete snapshot so repeated failures cannot exhaust production disk.
+    rm -rf -- "$RELEASE_ROOT"
     echo "ROLLBACK_RELEASE=$PREVIOUS_RELEASE"
     echo "FAILED_RELEASE=$RELEASE_CH"
     exit "$status"
@@ -292,6 +295,21 @@ catalogue_status="$(curl --fail --silent --location --resolve kengalearn.com:443
     'https://kengalearn.com/index.php?module=context&action=catalogue')"
 [[ "$home_status" == 200 && "$catalogue_status" == 200 ]]
 [[ "$(readlink -f "$CURRENT_LINK")" == "$RELEASE_CH" ]]
+
+# Keep the live release and two recent rollback snapshots. Application code is
+# immutable and reproducible from Git; persistent data and backups live outside
+# this directory and are deliberately untouched here.
+mapfile -t release_roots < <(
+    find "$BASE/releases" -mindepth 1 -maxdepth 1 -type d \
+        -name 'release-git-*' -printf '%T@ %p\n' \
+        | sort -nr | awk '{print $2}'
+)
+for release_index in "${!release_roots[@]}"; do
+    (( release_index < 3 )) && continue
+    obsolete_release="${release_roots[$release_index]}"
+    [[ "$obsolete_release" == "$RELEASE_ROOT" ]] && continue
+    rm -rf -- "$obsolete_release"
+done
 
 trap - ERR
 echo "DEPLOYMENT=PASS"

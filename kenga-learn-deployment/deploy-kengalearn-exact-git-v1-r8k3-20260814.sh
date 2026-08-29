@@ -17,6 +17,7 @@ STAGE="$SCRATCH/ch"
 FRAMEWORK_ARCHIVE="$SCRATCH/framework.tar.gz"
 MODULES_ARCHIVE="$SCRATCH/modules.tar.gz"
 CANVASES_ARCHIVE="$SCRATCH/canvases.tar.gz"
+USE_ORIGIN_MAIN="${CHISIMBA_DEPLOY_USE_ORIGIN_MAIN:-0}"
 
 cleanup() { rm -rf -- "$SCRATCH"; }
 trap cleanup EXIT
@@ -37,18 +38,22 @@ done
 
 say "Prove that Git is authoritative"
 for repository in "$FRAMEWORK" "$MODULES" "$CANVASES"; do
-    [[ "$(git -C "$repository" branch --show-current)" == main ]] \
-        || fail "$repository must be on main."
-    [[ -z "$(git -C "$repository" status --porcelain=v1)" ]] \
-        || fail "$repository has uncommitted changes. Commit or discard them before deployment."
     git -C "$repository" fetch origin main
-    [[ "$(git -C "$repository" rev-parse HEAD)" == "$(git -C "$repository" rev-parse origin/main)" ]] \
-        || fail "$repository main does not exactly match origin/main."
+    if [[ "$USE_ORIGIN_MAIN" != 1 ]]; then
+        [[ "$(git -C "$repository" branch --show-current)" == main ]] \
+            || fail "$repository must be on main."
+        [[ -z "$(git -C "$repository" status --porcelain=v1)" ]] \
+            || fail "$repository has uncommitted changes. Commit or discard them before deployment."
+        [[ "$(git -C "$repository" rev-parse HEAD)" == "$(git -C "$repository" rev-parse origin/main)" ]] \
+            || fail "$repository main does not exactly match origin/main."
+    fi
 done
 
-FRAMEWORK_COMMIT="$(git -C "$FRAMEWORK" rev-parse HEAD)"
-MODULES_COMMIT="$(git -C "$MODULES" rev-parse HEAD)"
-CANVASES_COMMIT="$(git -C "$CANVASES" rev-parse HEAD)"
+DEPLOY_REF=HEAD
+[[ "$USE_ORIGIN_MAIN" == 1 ]] && DEPLOY_REF=origin/main
+FRAMEWORK_COMMIT="$(git -C "$FRAMEWORK" rev-parse "$DEPLOY_REF")"
+MODULES_COMMIT="$(git -C "$MODULES" rev-parse "$DEPLOY_REF")"
+CANVASES_COMMIT="$(git -C "$CANVASES" rev-parse "$DEPLOY_REF")"
 FRAMEWORK_TREE="$(git -C "$FRAMEWORK" rev-parse HEAD:app)"
 MODULES_TREE="$(git -C "$MODULES" rev-parse 'HEAD^{tree}')"
 CANVASES_TREE="$(git -C "$CANVASES" rev-parse 'HEAD^{tree}')"

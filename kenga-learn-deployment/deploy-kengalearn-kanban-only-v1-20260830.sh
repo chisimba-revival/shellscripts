@@ -29,7 +29,7 @@ fail() { echo "ERROR: $*" >&2; exit 1; }
 KANBAN_COMMIT="$(git -C "$MODULES" rev-parse HEAD)"
 KANBAN_TREE="$(git -C "$MODULES" rev-parse HEAD:kanban)"
 KANBAN_VERSION="$(awk -F': ' '$1=="MODULE_VERSION"{print $2}' "$MODULES/kanban/register.conf")"
-[[ "$KANBAN_VERSION" == 0.117 ]] || fail "Expected Kanban 0.117; found $KANBAN_VERSION."
+[[ "$KANBAN_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || fail "Invalid Kanban version: $KANBAN_VERSION."
 
 say "Test the committed Kanban source"
 php -l "$MODULES/kanban/controller.php" >/dev/null

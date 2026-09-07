@@ -194,6 +194,7 @@ services:
     volumes:
       - /srv/kengalearn/app/current:/var/www/html:ro
       - /srv/kengalearn/shared/config:/var/www/html/config
+      - /srv/kengalearn/shared/sessions:/var/lib/php/sessions
       - /srv/kengalearn/shared/usrfiles:/var/www/html/usrfiles
       - /srv/kengalearn/shared/user_images:/var/www/html/user_images
       - /srv/kengalearn/shared/error_log:/var/www/html/error_log
@@ -270,6 +271,7 @@ env_file="$base/shared/secrets/production.env"
 mv "$incoming" "$release"
 mkdir -p \
     "$base/shared/config" \
+    "$base/shared/sessions" \
     "$base/shared/secrets" \
     "$base/shared/usrfiles" \
     "$base/shared/user_images" \

@@ -14,11 +14,24 @@ The staging script:
 - recreates the web container after changing the release link, ensuring its
   bind mount resolves to the same release recorded by that identity file.
 
-Run from the workspace root:
+For routine updates, run this from the workspace root as Derek, without
+`sudo`:
 
 ```bash
-bash shellscripts/chisimba-com-deployment/stage-exact-git-v1.sh
+bash shellscripts/chisimba-com-deployment/deploy-chisimba-com.sh
 ```
+
+The routine script checks that all three local repositories exactly match
+GitHub, creates a database and persistent-file backup, tests the new release
+before switching, automatically restores the preceding release if health or
+public checks fail, and retains the current release plus one rollback release.
+Only the newest verified database and persistent-file backup set is retained;
+failed or older deployment backups are removed.
+PHP sessions live in shared storage, so recreating the web container does not
+sign an administrator out before module updates can be applied.
+
+`stage-exact-git-v1.sh` is retained as the original provisioning script and
+should not be used for routine updates.
 
 After the staged service is healthy, configure Apache for
 `www.chisimba.com`, redirect `chisimba.com` to the canonical `www` host, issue

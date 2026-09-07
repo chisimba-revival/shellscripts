@@ -201,6 +201,7 @@ rollback() {
     # A failed immutable release is never a rollback target. Remove its
     # incomplete snapshot so repeated failures cannot exhaust production disk.
     rm -rf -- "$RELEASE_ROOT"
+    rm -rf -- "$BACKUP_DIR"
     echo "ROLLBACK_RELEASE=$PREVIOUS_RELEASE"
     echo "FAILED_RELEASE=$RELEASE_CH"
     exit "$status"
@@ -214,6 +215,28 @@ trap rollback ERR
 [[ "$(sha256sum "$MODULES_ARCHIVE" | awk '{print $1}')" == "$MODULES_SHA" ]]
 [[ "$(sha256sum "$CANVASES_ARCHIVE" | awk '{print $1}')" == "$CANVASES_SHA" ]]
 
+mkdir -p "$BASE/shared/sessions" "$BASE/shared/php"
+session_image="$(docker inspect --format '{{.Config.Image}}' kengalearn-production-web-1)"
+# PHP treats an empty session.save_path as /tmp. Preserve those live sessions
+# before the first container recreation that enables the persistent path.
+old_session_path="$(docker exec kengalearn-production-web-1 php -r 'echo ini_get("session.save_path");')"
+old_session_path="${old_session_path##*;}"
+[[ -n "$old_session_path" ]] || old_session_path=/tmp
+if [[ "$old_session_path" != /var/lib/php/sessions ]] && \
+   docker exec kengalearn-production-web-1 sh -lc "find '$old_session_path' -maxdepth 1 -type f -name 'sess_*' -print -quit | grep -q ."; then
+    docker exec kengalearn-production-web-1 sh -lc "cd '$old_session_path' && tar -cf - sess_*" | \
+        docker run --rm -i --entrypoint tar -v "$BASE/shared/sessions:/sessions" "$session_image" -xf - -C /sessions
+fi
+docker run --rm --entrypoint sh -v "$BASE/shared/sessions:/sessions" "$session_image" \
+    -c 'chown -R 33:33 /sessions && chmod 0770 /sessions'
+printf 'session.save_path = "/var/lib/php/sessions"\n' > "$BASE/shared/php/99-chisimba-sessions.ini"
+if ! grep -Fq '/srv/kengalearn/shared/sessions:/var/lib/php/sessions' "$COMPOSE_FILE"; then
+    sed -i '/shared\/config:\/var\/www\/html\/config/a\      - /srv/kengalearn/shared/sessions:/var/lib/php/sessions' "$COMPOSE_FILE"
+fi
+if ! grep -Fq '/srv/kengalearn/shared/php/99-chisimba-sessions.ini:/usr/local/etc/php/conf.d/99-chisimba-sessions.ini:ro' "$COMPOSE_FILE"; then
+    sed -i '/shared\/sessions:\/var\/lib\/php\/sessions/a\      - /srv/kengalearn/shared/php/99-chisimba-sessions.ini:/usr/local/etc/php/conf.d/99-chisimba-sessions.ini:ro' "$COMPOSE_FILE"
+fi
+
 echo "Creating precautionary backups of persistent state..."
 mkdir -p "$BACKUP_DIR" "$RELEASE_CH/packages"
 compose exec -T db mariadb-dump -u"$MARIADB_USER" "-p$MARIADB_PASSWORD" \
@@ -225,6 +248,11 @@ compose exec -T web tar -C /var/www/html -czf - config usrfiles user_images \
 tar -tzf "$BACKUP_DIR/persistent-files.tar.gz" >/dev/null
 sha256sum "$BACKUP_DIR/database.sql.gz" "$BACKUP_DIR/persistent-files.tar.gz" \
     > "$BACKUP_DIR/SHA256SUMS"
+
+# Retired Context catalogue blocks have no class in current releases. Existing
+# installations can retain their old rows until module updates are run.
+compose exec -T db mariadb -u"$MARIADB_USER" "-p$MARIADB_PASSWORD" "$MARIADB_DATABASE" \
+    -e "DELETE FROM tbl_module_blocks WHERE moduleid='context' AND blockname IN ('context','browsecontext');" </dev/null
 
 echo "Extracting into an empty application directory..."
 tar -xzf "$FRAMEWORK_ARCHIVE" -C "$RELEASE_CH" --strip-components=1
@@ -296,7 +324,7 @@ catalogue_status="$(curl --fail --silent --location --resolve kengalearn.com:443
 [[ "$home_status" == 200 && "$catalogue_status" == 200 ]]
 [[ "$(readlink -f "$CURRENT_LINK")" == "$RELEASE_CH" ]]
 
-# Keep the live release and two recent rollback snapshots. Application code is
+# Keep the live release and one recent rollback snapshot. Application code is
 # immutable and reproducible from Git; persistent data and backups live outside
 # this directory and are deliberately untouched here.
 mapfile -t release_roots < <(
@@ -305,11 +333,18 @@ mapfile -t release_roots < <(
         | sort -nr | awk '{print $2}'
 )
 for release_index in "${!release_roots[@]}"; do
-    (( release_index < 3 )) && continue
+    (( release_index < 2 )) && continue
     obsolete_release="${release_roots[$release_index]}"
     [[ "$obsolete_release" == "$RELEASE_ROOT" ]] && continue
     rm -rf -- "$obsolete_release"
 done
+
+# Keep one verified persistent-state backup. Failed deployments remove their
+# incomplete backup in rollback(), and older successful backups are pruned here.
+while IFS= read -r old_backup; do
+    [[ "$old_backup" == "$BACKUP_DIR" ]] && continue
+    rm -rf -- "$old_backup"
+done < <(find "$BASE/backups" -mindepth 1 -maxdepth 1 -type d \( -name 'git-deploy-*' -o -name 'git-update-*' \) -print)
 
 trap - ERR
 echo "DEPLOYMENT=PASS"

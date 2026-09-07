@@ -12,6 +12,7 @@ services:
     volumes:
       - /srv/chisimba-com/app/current:/var/www/html:ro
       - /srv/chisimba-com/shared/config:/var/www/html/config
+      - /srv/chisimba-com/shared/sessions:/var/lib/php/sessions
       - /srv/chisimba-com/shared/usrfiles:/var/www/html/usrfiles
       - /srv/chisimba-com/shared/user_images:/var/www/html/user_images
       - /srv/chisimba-com/shared/error_log:/var/www/html/error_log
